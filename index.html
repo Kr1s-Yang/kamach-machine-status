@@ -4383,6 +4383,71 @@ window.RUSSIAN_CITIES = [
     updateDirtyBadge();
   }
 
+  // ===== 每 10 秒自动保存 + 同步到 Supabase（失败安全：仅在本地有改动时联网，逐表 try/catch）=====
+  var __syncTimer = null, __lastSyncErr = 0;
+  function __toISO(ts){ if(ts==null) return null; return (typeof ts==='number') ? new Date(ts).toISOString() : ts; }
+  function __normTags(t){ if(Array.isArray(t)) return t; if(!t) return []; return String(t).split(',').map(function(s){return s.trim();}).filter(Boolean); }
+  async function syncToSupabase() {
+    if (!window.__SUPABASE_MODE__ || !window.__sb__) return;
+    if (!dirty) return;                 // 无改动则不同步，避免空写与覆盖
+    var sb = window.__sb__;
+    try {
+      var mines = [], devices = [], faults = [], fimgs = [], kb = [];
+      state.mines.forEach(function (m) {
+        mines.push({ id: m.id, name: m.name, lat: m.lat, lng: m.lng, sort: m.sort || 0 });
+        (m.devices || []).forEach(function (d) {
+          var a = d.archive || {}, C = a.components || {};
+          devices.push({
+            id: d.id, mine_id: m.id, code: d.code || '', type: d.type || '',
+            status: d.status || 'running', stop_reason: d.stopReason || '',
+            model: a.model || '', customer: a.customer || '',
+            delivery_date: a.deliveryDate || '',
+            run_hours: (a.runHours != null && a.runHours !== '') ? String(a.runHours) : '',
+            warranty: a.warranty || 'unknown', warranty_until: a.warrantyUntil || '',
+            components: { engine: C.engine || {}, compressor: C.compressor || {}, axle: C.axle || {}, transmission: C.transmission || {} },
+            sort: d.sort || 0
+          });
+          (d.faults || []).forEach(function (f) {
+            faults.push({ id: f.id, device_id: d.id, mine_id: m.id, text: f.text || '',
+              created_at: __toISO(f.createdAt), fixed: !!f.fixed, fixed_at: __toISO(f.fixedAt) });
+            (f.images || []).forEach(function (im) {
+              if (im && im.path && im.bucket) {
+                fimgs.push({ id: im.id, fault_id: f.id, name: im.name || '', mime: im.mime || '',
+                  size: im.size || 0, uploaded_at: __toISO(im.uploadedAt), storage_path: im.path,
+                  original_stored: im.stored || 'folder' });
+              }
+            });
+          });
+        });
+      });
+      (state.kb || []).forEach(function (k) {
+        if (k && k.path && k.bucket === 'kb_files') {
+          kb.push({ id: k.id, title: k.title || '', tags: __normTags(k.tags), device_type: k.deviceType || '',
+            note: k.note || '', file_name: k.fileName || '', mime: k.mime || '', size: k.size || 0,
+            uploaded_at: __toISO(k.uploadedAt), storage_path: k.path, original_stored: k.stored || 'folder' });
+        }
+      });
+      // 逐表 upsert（onConflict id）；只增改、绝不删除 DB 中多余的行，避免误删数据
+      if (mines.length)   await sb.from('mines').upsert(mines, { onConflict: 'id' });
+      if (devices.length) await sb.from('devices').upsert(devices, { onConflict: 'id' });
+      if (faults.length)  await sb.from('faults').upsert(faults, { onConflict: 'id' });
+      if (fimgs.length)   await sb.from('fault_images').upsert(fimgs, { onConflict: 'id' });
+      if (kb.length)      await sb.from('kb_files').upsert(kb, { onConflict: 'id' });
+      await sb.from('app_meta').upsert({ key: 'savedAt', value: { ts: Date.now() } }, { onConflict: 'key' });
+      markClean();
+      toast('已自动同步到云端 ✓');
+    } catch (e) {
+      console.error('[sync] failed', e);
+      var now = Date.now();
+      if (now - __lastSyncErr > 30000) { toast('云端同步失败：' + (e && e.message ? e.message : e)); __lastSyncErr = now; }
+    }
+  }
+  function startAutoSync() {
+    if (__syncTimer) return;
+    __syncTimer = setInterval(function () { if (dirty) { save(); syncToSupabase(); } }, 10000);
+  }
+  startAutoSync();
+
   /* 总览栏折叠 / 展开 */
   function bindOverview() {
     const ovToggle = document.getElementById('ovToggle');
