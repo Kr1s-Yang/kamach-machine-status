@@ -1036,7 +1036,7 @@ body {
 /* ============ 弹窗 ============ */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 2000;
-  background: rgba(15,23,42,.5); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  background: rgba(15,23,42,.62);
   display: flex; align-items: center; justify-content: center; padding: 16px;
   animation: overlay-in var(--t-fast) var(--ease);
 }
@@ -1266,9 +1266,7 @@ body {
   top: 168px; left: 14px; width: 300px;
   max-height: calc(100vh - 168px - 46px);
   display: flex; flex-direction: column;
-  background: linear-gradient(160deg, rgba(30,58,138,.50) 0%, rgba(37,99,235,.36) 46%, rgba(12,102,168,.44) 100%);
-  -webkit-backdrop-filter: blur(14px) saturate(1.15);
-  backdrop-filter: blur(14px) saturate(1.15);
+  background: linear-gradient(160deg, rgba(15,32,80,.94) 0%, rgba(15,40,92,.92) 46%, rgba(8,52,84,.94) 100%);
   border: 1px solid rgba(191,219,254,.55);
   border-radius: var(--r-md);
   box-shadow:
@@ -1369,7 +1367,6 @@ body {
   border-radius: 11px; padding: 9px 13px; cursor: pointer;
   font-size: 13px; font-weight: 700;
   box-shadow: 0 10px 24px rgba(8,15,35,.36), inset 0 1px 0 rgba(255,255,255,.25);
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   display: none; transition: filter .15s ease, transform .15s ease;
 }
 .ov-fab:hover { filter: brightness(1.08); transform: translateY(-1px); }
@@ -1387,7 +1384,6 @@ body {
   border: 1px solid rgba(148,163,184,.38);
   border-radius: 13px; padding: 11px 13px; color: #e2e8f0;
   box-shadow: 0 14px 32px rgba(8,15,35,.42), inset 0 1px 0 rgba(255,255,255,.10);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
   width: 192px;
 }
 .basemap-switch .bm-title { font-size: 11px; font-weight: 700; color: #93c5fd; margin-bottom: 8px; letter-spacing: .6px; text-transform: uppercase; }
@@ -1427,9 +1423,7 @@ body {
   top: 168px; right: 14px; width: 320px;
   max-height: calc(100vh - 168px - 92px);
   display: flex; flex-direction: column;
-  background: linear-gradient(160deg, rgba(30,58,138,.52) 0%, rgba(37,99,235,.36) 46%, rgba(12,74,110,.46) 100%);
-  -webkit-backdrop-filter: blur(14px) saturate(1.15);
-  backdrop-filter: blur(14px) saturate(1.15);
+  background: linear-gradient(160deg, rgba(15,32,80,.94) 0%, rgba(15,40,92,.92) 46%, rgba(8,52,84,.94) 100%);
   border: 1px solid rgba(191,219,254,.55);
   border-radius: var(--r-md);
   box-shadow:
@@ -2621,6 +2615,7 @@ window.RUSSIAN_CITIES = [
 
     // 全球范围地图：不限制视野，可自由缩放 / 平移到世界任意位置
     map = L.map('map', {
+      preferCanvas: true,
       center: [50, 60], zoom: 3, minZoom: 2, maxZoom: 18, zoomControl: true,
       worldCopyJump: false
     });
