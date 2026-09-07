@@ -2559,14 +2559,17 @@ window.RUSSIAN_CITIES = [
     // 矿山光点独立图层：所有矿山 marker 都挂这里，渲染前用 clearLayers() 彻底清空，
     // 避免“同一矿山多条 marker 叠加 / 旧 marker 残留”导致的“两组光标”问题
     mineLayer = L.layerGroup().addTo(map);
-    if (window.WORLD_GEOJSON && window.WORLD_GEOJSON.features) {
-      L.geoJSON(window.WORLD_GEOJSON, {
-        style: { color: '#94a3b8', weight: 0.6, fillColor: '#eef2f7', fillOpacity: 1 },
-        interactive: false
-      }).addTo(offlineLayer);
-    } else if (window.RUSSIA_GEOJSON && window.RUSSIA_GEOJSON.features) {
+    // 离线矢量底图优先用「俄罗斯轮廓」(598 点)，而非世界国界 (10654 点)：
+    // 所有矿山均在俄罗斯境内，世界国界纯属多余且平移/缩放时整张重绘极卡。
+    // 世界国界仅作为兜底（极端情况下俄罗斯轮廓缺失时）。
+    if (window.RUSSIA_GEOJSON && window.RUSSIA_GEOJSON.features) {
       L.geoJSON(window.RUSSIA_GEOJSON, {
         style: { color: '#94a3b8', weight: 1, fillColor: '#e8eef6', fillOpacity: 1 },
+        interactive: false
+      }).addTo(offlineLayer);
+    } else if (window.WORLD_GEOJSON && window.WORLD_GEOJSON.features) {
+      L.geoJSON(window.WORLD_GEOJSON, {
+        style: { color: '#94a3b8', weight: 0.6, fillColor: '#eef2f7', fillOpacity: 1 },
         interactive: false
       }).addTo(offlineLayer);
     }
