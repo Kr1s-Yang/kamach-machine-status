@@ -30,6 +30,13 @@ assets/矿山设备监控系统.html
 assets/data.js
 migrate_data.js
 
+# 含客户数据的导出/备份/中间产物（绝不入库，仓库为 public）
+app.userdata.*.html
+extracted_mine_data.json
+_supabase_backup_*.json
+live_check.html
+live_pages.html
+
 # SQL 脚本（含管理员邮箱+表结构，不入库）
 supabase_*.sql
 

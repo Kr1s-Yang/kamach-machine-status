@@ -1165,6 +1165,8 @@ body {
 .fault-empty { font-size: 12px; color: #94a3b8; padding: 2px 0 4px; }
 .fault-point-row { display: flex; gap: 6px; margin-bottom: 7px; }
 .fault-point-row input { flex: 1; }
+.fp-date-lbl { flex: 0 0 auto; align-self: center; font-size: 12px; color: #64748b; white-space: nowrap; }
+.fault-point-row input.fp-date { flex: 0 0 146px; }
 .fault-del {
   flex-shrink: 0; width: 34px; background: var(--danger-soft); border: 1px solid #fecaca;
   color: var(--danger); border-radius: var(--r-sm); cursor: pointer; font-size: 16px; line-height: 1;
@@ -2738,6 +2740,53 @@ window.RUSSIAN_CITIES = [
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
+  // 仅日期（不含时间），用于展示"故障发生日期"
+  function fmtDate(ts) {
+    if (!ts) return '—';
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return '—';
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  // 转为 <input type="date"> 需要的 YYYY-MM-DD
+  function fmtDateInput(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+
+  /* 从故障文本中自动解析"故障发生日期"。
+     兼容写法：2026.9.1空压机叶片断裂 / 2026.9.4料位传感器失效（非质保）/
+               空压机自停2026.8.21 / 空压机叶片损坏2026.8.2 /
+               2026.8.22：驱动桥活塞盘出现裂缝 / 2026-09-01 / 2026/9/1 等
+     解析失败返回 null，且绝不改动原文。 */
+  function parseFaultDate(text) {
+    if (!text) return null;
+    var m = String(text).match(/(20\d{2})\s*[.\-\/年]\s*(\d{1,2})\s*[.\-\/月]\s*(\d{1,2})\s*日?/);
+    if (!m) return null;
+    var y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+    if (y < 2000 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    var dt = new Date(y, mo - 1, d, 12, 0, 0, 0);   // 取中午，规避时区偏移导致串日
+    return isNaN(dt.getTime()) ? null : dt.getTime();
+  }
+
+  // 一次性回填：历史故障若无发生日期，则从其文本中解析并写入 occurredAt
+  function backfillFaultDates() {
+    var n = 0;
+    state.mines.forEach(function (mine) {
+      (mine.devices || []).forEach(function (d) {
+        (d.faults || []).forEach(function (f) {
+          if (f.occurredAt) return;
+          var ts = parseFaultDate(f.text);
+          if (ts) { f.occurredAt = ts; n++; }
+        });
+      });
+    });
+    return n;
+  }
+
   // 汇总全部设备的故障记录，展开成一条条（含设备序列号 + 所属矿山）
   function collectFaultRecords() {
     var recs = [];
@@ -2747,14 +2796,18 @@ window.RUSSIAN_CITIES = [
           recs.push({
             mineId: mine.id, mineName: mine.name,
             deviceId: d.id, deviceCode: d.code || '未命名设备', deviceType: d.type || '',
-            faultId: f.id, text: f.text, createdAt: f.createdAt, fixed: !!f.fixed, fixedAt: f.fixedAt || null,
+            faultId: f.id, text: f.text, createdAt: f.createdAt,
+            occurredAt: f.occurredAt || null,
+            fixed: !!f.fixed, fixedAt: f.fixedAt || null,
             imgCount: (f.images || []).length
           });
         });
       });
     });
-    // 按故障录入时间顺序排列（最早在前）
-    recs.sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+    // 按「故障发生日期」倒序（最新在前）；无发生日期时回退到录入时间。
+    // 旧逻辑为正序，导致最新录入的故障被排到列表最底部、折叠在可视区外，看上去像"没同步"。
+    var frKey = function (r) { return r.occurredAt || r.createdAt || 0; };
+    recs.sort(function (a, b) { return frKey(b) - frKey(a); });
     return recs;
   }
 
@@ -2785,6 +2838,7 @@ window.RUSSIAN_CITIES = [
       html += '  <div class="ft-mine">⛏ ' + esc(r.mineName) + (r.deviceType ? ' · ' + esc(r.deviceType) : '') + '</div>';
       html += '  <div class="ft-text">' + esc(r.text) + '</div>';
       html += '  <div class="ft-meta">';
+      html += '    <span class="ft-time">发生 ' + fmtDate(r.occurredAt) + '</span>';
       html += '    <span class="ft-time">录入 ' + fmtTime(r.createdAt) + '</span>';
       if (r.fixed) html += '<span class="ft-time fixed">修复 ' + fmtTime(r.fixedAt) + '</span>';
       html += '  </div>';
@@ -3108,9 +3162,9 @@ window.RUSSIAN_CITIES = [
     // 故障点列表：仅编辑"未修复"故障；"已修复"故障作为历史保留，不在编辑器中显示
     var allF = dev && dev.faults ? dev.faults : [];
     faultPoints = allF.filter(function (f) { return !f.fixed; })
-      .map(function (f) { return { id: f.id, text: f.text, createdAt: f.createdAt, fixed: false, fixedAt: null, images: (f.images || []).slice() }; });
+      .map(function (f) { return { id: f.id, text: f.text, createdAt: f.createdAt, occurredAt: f.occurredAt || parseFaultDate(f.text) || null, fixed: false, fixedAt: null, images: (f.images || []).slice() }; });
     devCtx.fixedFaults = allF.filter(function (f) { return f.fixed; })
-      .map(function (f) { return { id: f.id, text: f.text, createdAt: f.createdAt, fixed: true, fixedAt: f.fixedAt, images: (f.images || []).slice() }; });
+      .map(function (f) { return { id: f.id, text: f.text, createdAt: f.createdAt, occurredAt: f.occurredAt || parseFaultDate(f.text) || null, fixed: true, fixedAt: f.fixedAt, images: (f.images || []).slice() }; });
     fiSession = { added: [], removed: [] };   // 本次编辑会话的图片增删记录（取消时回滚）
     document.getElementById('devStopReason').value = dev ? (dev.stopReason || '') : '';
 
@@ -3475,6 +3529,26 @@ window.RUSSIAN_CITIES = [
       input.placeholder = '故障点 ' + (i + 1) + '：如 主轴承过热';
       input.value = fp.text;
       input.addEventListener('input', function () { fp.text = input.value; });
+
+      // 故障发生日期：可手动选择；未手动指定时随故障描述自动解析
+      const dateLbl = document.createElement('span');
+      dateLbl.className = 'fp-date-lbl';
+      dateLbl.textContent = '发生日期';
+      const dateInput = document.createElement('input');
+      dateInput.type = 'date';
+      dateInput.className = 'fp-date';
+      dateInput.title = '故障发生日期（也可直接在故障描述里写 2026.9.1，会自动识别）';
+      dateInput.value = fmtDateInput(fp.occurredAt);
+      dateInput.addEventListener('change', function () {
+        fp.occurredAt = dateInput.value ? new Date(dateInput.value + 'T12:00:00').getTime() : null;
+      });
+      input.addEventListener('input', function () {
+        if (!dateInput.value) {
+          var ts = parseFaultDate(input.value);
+          if (ts) { fp.occurredAt = ts; dateInput.value = fmtDateInput(ts); }
+        }
+      });
+
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'fault-del';
@@ -3492,6 +3566,8 @@ window.RUSSIAN_CITIES = [
         faultPoints.splice(i, 1); renderFaultEditor();
       });
       row.appendChild(input);
+      row.appendChild(dateLbl);
+      row.appendChild(dateInput);
       row.appendChild(del);
       wrap.appendChild(row);
 
@@ -3515,7 +3591,7 @@ window.RUSSIAN_CITIES = [
     document.getElementById('faultField').classList.toggle('hidden', st !== 'fault');
     document.getElementById('stopField').classList.toggle('hidden', st !== 'stopped');
     if (st === 'fault') {
-      if (faultPoints.length === 0) faultPoints.push({ id: uid(), text: '', createdAt: Date.now(), fixed: false, fixedAt: null });
+      if (faultPoints.length === 0) faultPoints.push({ id: uid(), text: '', createdAt: Date.now(), occurredAt: null, fixed: false, fixedAt: null });
       renderFaultEditor();
     }
   }
@@ -3536,7 +3612,8 @@ window.RUSSIAN_CITIES = [
     const stopReason = document.getElementById('devStopReason').value.trim();
     // 未修复故障点（编辑器内容）→ 规范化为故障对象，保留各自的录入时间
     const active = faultPoints.map(function (f) {
-      return { id: f.id || uid(), text: (f.text || '').trim(), createdAt: f.createdAt || Date.now(), fixed: false, fixedAt: null, images: f.images || [] };
+      var occ = f.occurredAt || parseFaultDate(f.text) || null;
+      return { id: f.id || uid(), text: (f.text || '').trim(), createdAt: f.createdAt || Date.now(), occurredAt: occ, fixed: false, fixedAt: null, images: f.images || [] };
     }).filter(function (f) { return f.text; });
     if (status === 'fault' && active.length === 0) { toast('故障状态下请至少填写一个故障点'); return; }
     const fixedHist = devCtx.fixedFaults || [];   // 已修复历史，始终保留
@@ -4267,7 +4344,7 @@ window.RUSSIAN_CITIES = [
       enterPickMode({ forNew: back === null, mineId: back || undefined });
     };
     document.getElementById('devStatus').onchange = toggleStatusFields;
-    document.getElementById('addFaultBtn').onclick = function () { faultPoints.push({ id: uid(), text: '', createdAt: Date.now(), fixed: false, fixedAt: null }); renderFaultEditor(); };
+    document.getElementById('addFaultBtn').onclick = function () { faultPoints.push({ id: uid(), text: '', createdAt: Date.now(), occurredAt: null, fixed: false, fixedAt: null }); renderFaultEditor(); };
 
     document.querySelectorAll('[data-close]').forEach(function (b) {
       b.onclick = function () { mineModal.classList.add('hidden'); closeDeviceModal(); };
@@ -4363,6 +4440,8 @@ window.RUSSIAN_CITIES = [
       initMap();
     }
     load();
+    // 历史故障补填「发生日期」：从故障描述文本中自动解析（如 "2026.9.1空压机叶片断裂"）
+    try { if (backfillFaultDates() > 0) save(); } catch (e) { console.warn('[backfill] failed', e); }
     // 恢复之前关联过的资料文件夹句柄（无需重新选择）
     loadKbDirHandle();
     // 把历史"内嵌在网页里的 base64 资料"迁移到独立存储，释放 localStorage
@@ -4407,7 +4486,8 @@ window.RUSSIAN_CITIES = [
           });
           (d.faults || []).forEach(function (f) {
             faults.push({ id: f.id, device_id: d.id, mine_id: m.id, text: f.text || '',
-              created_at: __toISO(f.createdAt), fixed: !!f.fixed, fixed_at: __toISO(f.fixedAt) });
+              created_at: __toISO(f.createdAt), fixed: !!f.fixed, fixed_at: __toISO(f.fixedAt),
+              occurred_at: __toISO(f.occurredAt || null) });
             (f.images || []).forEach(function (im) {
               if (im && im.path && im.bucket) {
                 fimgs.push({ id: im.id, fault_id: f.id, name: im.name || '', mime: im.mime || '',
@@ -4428,7 +4508,15 @@ window.RUSSIAN_CITIES = [
       // 逐表 upsert（onConflict id）；只增改、绝不删除 DB 中多余的行，避免误删数据
       if (mines.length)   await sb.from('mines').upsert(mines, { onConflict: 'id' });
       if (devices.length) await sb.from('devices').upsert(devices, { onConflict: 'id' });
-      if (faults.length)  await sb.from('faults').upsert(faults, { onConflict: 'id' });
+      if (faults.length) {
+        var fr = await sb.from('faults').upsert(faults, { onConflict: 'id' });
+        // 容错：若云端 faults 表尚无 occurred_at 列，去掉该字段重试，避免整轮同步中断
+        if (fr && fr.error && /occurred_at|column/i.test(fr.error.message || '')) {
+          console.warn('[sync] faults 缺少 occurred_at 列，回退为不含该字段的 upsert');
+          faults.forEach(function (f) { delete f.occurred_at; });
+          await sb.from('faults').upsert(faults, { onConflict: 'id' });
+        }
+      }
       if (fimgs.length)   await sb.from('fault_images').upsert(fimgs, { onConflict: 'id' });
       if (kb.length)      await sb.from('kb_files').upsert(kb, { onConflict: 'id' });
       await sb.from('app_meta').upsert({ key: 'savedAt', value: { ts: Date.now() } }, { onConflict: 'key' });
