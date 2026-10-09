@@ -2105,6 +2105,17 @@ window.RUSSIAN_CITIES = [
       var kb=(kR.data||[]).map(function(k){
         return {id:k.id,title:k.title,tags:k.tags,deviceType:k.device_type,note:k.note,fileName:k.file_name,mime:k.mime,size:k.size,uploadedAt:k.uploaded_at?new Date(k.uploaded_at).getTime():null,stored:'folder',path:k.storage_path,bucket:'kb_files'};
       });
+      // 保护：若本机存在"比云端更新"的改动（尚未同步），绝不用云端旧数据覆盖它，
+      // 否则用户刚编辑完就刷新，改动会被静默丢弃。此时保留本机数据并标记待同步。
+      var cloudSavedAt = (aR && aR.data && aR.data.value && aR.data.value.ts) || 0;
+      var localSavedAt = 0;
+      try { var rawLs = localStorage.getItem('mine-monitor-data-v1'); if (rawLs) localSavedAt = JSON.parse(rawLs).savedAt || 0; } catch (e) {}
+      if (localSavedAt > cloudSavedAt + 15000) {
+        console.warn('[SB] 本机有未同步改动，保留本机数据并等待上传');
+        tryRender();
+        if (window.__app__ && window.__app__.markDirty) window.__app__.markDirty();
+        return;
+      }
       window.MINE_DATA={mines:mines,kb:kb,savedAt:Date.now()};
       // Write to localStorage so load() picks Supabase data over sample/old data
       try{localStorage.setItem('mine-monitor-data-v1',JSON.stringify({savedAt:Date.now(),mines:mines,kb:kb}));}catch(e){}
@@ -2523,7 +2534,23 @@ window.RUSSIAN_CITIES = [
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
   }
-  function markDirty() { dirty = true; updateDirtyBadge(); }
+  var __syncSoonTimer = null;
+  function markDirty() {
+    dirty = true; updateDirtyBadge();
+    // 改动后 1.2s（防抖）立即触发一次云端同步。
+    // 原因：页面每次加载都会用云端数据覆盖本机；若只依赖 10s 轮询，
+    // "改完马上刷新"会导致改动尚未上传即被云端旧数据覆盖丢失。
+    if (window.__SUPABASE_MODE__ && window.__sb__) {
+      if (__syncSoonTimer) clearTimeout(__syncSoonTimer);
+      __syncSoonTimer = setTimeout(function () {
+        __syncSoonTimer = null;
+        if (dirty && !window.__syncing) {
+          window.__syncing = true;
+          Promise.resolve(syncToSupabase()).finally(function () { window.__syncing = false; });
+        }
+      }, 1200);
+    }
+  }
   function markClean() { dirty = false; updateDirtyBadge(); }
   function updateDirtyBadge() {
     const el = document.getElementById('dirtyBadge');
@@ -2616,6 +2643,14 @@ window.RUSSIAN_CITIES = [
     }, 10000);
   }
   startAutoSync();
+  // 切走标签页 / 关闭页面前：若有未同步改动，立刻上传一次，缩短丢失窗口
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden' && dirty && !window.__syncing && window.__SUPABASE_MODE__ && window.__sb__) {
+      save();
+      window.__syncing = true;
+      Promise.resolve(syncToSupabase()).finally(function () { window.__syncing = false; });
+    }
+  });
 
   /* ---------- 地图 ---------- */
   function initMap() {
@@ -4556,7 +4591,7 @@ window.RUSSIAN_CITIES = [
     });
   }
 
-    window.__app__ = { load: load, renderMarkers: typeof renderMarkers!=='undefined'?renderMarkers:null, renderOverview: renderOverview, renderFaultTable: renderFaultTable, renderKb: typeof renderKb!=='undefined'?renderKb:null, state: state };
+    window.__app__ = { load: load, renderMarkers: typeof renderMarkers!=='undefined'?renderMarkers:null, renderOverview: renderOverview, renderFaultTable: renderFaultTable, renderKb: typeof renderKb!=='undefined'?renderKb:null, state: state, markDirty: markDirty, syncNow: function () { return syncToSupabase(); } };
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
